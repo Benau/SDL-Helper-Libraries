@@ -253,8 +253,7 @@ std::streambuf::int_type SDLStreamBuffer::underflow()
     if (readed == 0)
         return EOF;
 
-    setg(m_in_buffer.data(), m_in_buffer.data() + BUFFER_SIZE,
-        m_in_buffer.data() + BUFFER_SIZE);
+    setg(m_in_buffer.data(), m_in_buffer.data(), m_in_buffer.data() + readed);
     return static_cast<unsigned char>(*gptr());
 }   // underflow
 
