@@ -143,3 +143,171 @@ void iosfstream::open(SDL_RWops *File) {
 void iosfstream::open(std::string Filename, std::string FileOptions) {
 	sfbuf::open(Filename, FileOptions);
 }
+
+    inline std::istream& safeGetline(std::istream& is, std::string& t)
+    {
+        t.clear();
+
+        // The characters in the stream are read one-by-one using a std::streambuf.
+        // That is faster than reading them one-by-one using the std::istream.
+        // Code that uses streambuf this way must be guarded by a sentry object.
+        // The sentry object performs various tasks,
+        // such as thread synchronization and updating the stream state.
+        std::istream::sentry se(is, true);
+        std::streambuf* sb = is.rdbuf();
+
+        for(;;)
+        {
+            int c = sb->sbumpc();
+            switch (c)
+            {
+            case '\n':
+                return is;
+            case '\r':
+                if(sb->sgetc() == '\n')
+                    sb->sbumpc();
+                return is;
+            case std::streambuf::traits_type::eof():
+                // Also handle the case when the last line has no line ending
+                if (t.empty())
+                    is.setstate(std::ios::eofbit);
+                return is;
+            default:
+                t += (char)c;
+            }
+        }
+    }
+
+
+
+// ============================================================================
+SDLStreamBuffer::SDLStreamBuffer(SDL_RWops* file)
+{
+    m_file = NULL;
+    if (file)
+        open(file);
+}   // SDLStreamBuffer
+
+// ----------------------------------------------------------------------------
+SDLStreamBuffer::~SDLStreamBuffer()
+{
+    sync();
+    if (m_file)
+        SDL_RWclose(m_file);
+}   // ~SDLStreamBuffer
+
+// ----------------------------------------------------------------------------
+void SDLStreamBuffer::open(SDL_RWops* file)
+{
+    if (!file)
+        return;
+    if (m_file)
+    {
+        sync();
+        SDL_RWclose(m_file);
+    }
+
+    m_file = file;
+    m_in_buffer = {};
+    m_out_buffer = {};
+
+    setg(m_in_buffer.data(), m_in_buffer.data() + BUFFER_SIZE,
+        m_in_buffer.data() + BUFFER_SIZE);
+    setp(m_out_buffer.data(), m_out_buffer.data() + BUFFER_SIZE);
+}   // open
+
+// ----------------------------------------------------------------------------
+std::streambuf::int_type SDLStreamBuffer::sync()
+{
+    if (pptr() > pbase())
+    {
+        size_t written = SDL_RWwrite(m_file, m_out_buffer.data(), sizeof(char),
+            pptr() - pbase());
+        if (written < size_t(pptr() - pbase()))
+            return -1;
+        setp(m_out_buffer.data(), m_out_buffer.data() + BUFFER_SIZE);
+    }
+    return 0;
+}   // sync
+
+// ----------------------------------------------------------------------------
+std::streambuf::int_type SDLStreamBuffer::overflow(int_type c)
+{
+    sync();
+    if (c != EOF)
+    {
+        *pptr() = c;
+        pbump(1);
+    }
+    return c;
+}   // overflow
+
+// ----------------------------------------------------------------------------
+std::streambuf::int_type SDLStreamBuffer::underflow()
+{
+    if (gptr() < egptr())
+        return *gptr();
+
+    size_t readed = SDL_RWread(m_file, m_in_buffer.data(), sizeof(char),
+        BUFFER_SIZE);
+    if (readed == 0)
+        return EOF;
+
+    setg(m_in_buffer.data(), m_in_buffer.data() + BUFFER_SIZE,
+        m_in_buffer.data() + BUFFER_SIZE);
+    return static_cast<unsigned char>(*gptr());
+}   // underflow
+
+// ----------------------------------------------------------------------------
+std::streampos SDLStreamBuffer::seekoff(std::streamoff off,
+                                        std::ios::seekdir way,
+                                        std::ios::openmode which)
+{
+    int whence = 0;
+    switch (way)
+    {
+    case std::ios::beg:
+        whence = RW_SEEK_SET;
+        break;
+    case std::ios::cur:
+        whence = RW_SEEK_CUR;
+        break;
+    case std::ios::end:
+        whence = RW_SEEK_END;
+        break;
+    default:
+        break;
+    }
+    int64_t pos = SDL_RWseek(m_file, off, whence);
+    if (pos == -1)
+        return -1;
+
+    setg(m_in_buffer.data(), m_in_buffer.data() + BUFFER_SIZE,
+        m_in_buffer.data() + BUFFER_SIZE);
+    setp(m_out_buffer.data(), m_out_buffer.data() + BUFFER_SIZE);
+    return pos;
+}   // seekoff
+
+// ============================================================================
+SDLRWopsifstream::SDLRWopsifstream(SDL_RWops* file)
+                : SDLStreamBuffer(file), std::istream(this)
+{
+}   // SDLRWopsifstream
+
+// ----------------------------------------------------------------------------
+void SDLRWopsifstream::open(SDL_RWops* file)
+{
+    SDLStreamBuffer::open(file);
+}   // open
+
+int main()
+{
+//isfstream Stream2("/data/game/stk-code/data/po/zh_TW.po", "rb");
+SDLRWopsifstream Stream2(SDL_RWFromFile("/data/game/stk-code/data/po/zh_TW.po", "rb"));
+	std::string line;
+	while (!safeGetline(Stream2, line).eof())
+	{
+		printf("%s\n",line.c_str());
+	}
+
+}
